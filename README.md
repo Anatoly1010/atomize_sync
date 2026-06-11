@@ -35,8 +35,8 @@ Copies the shared, plain-led framework files that should be identical
 everywhere — `device_modules/`, `math_modules/`, `general_modules/`, `main/`,
 `__main__.py` — into the fork(s). It **skips every EXPECTED file**, so the
 genuine per-fork divergences are never clobbered: `last_dir.py` (backend),
-`main_window.py`, `local_config.py` (app_name), the fork-only `main.py` /
-`__main__.py`, `control_center/`, configs.
+`local_config.py` (app_name), the fork-only `main.py` / `__main__.py`,
+`control_center/`, configs.
 
 Comparison is EOL-normalised (only real content differences are copied) and
 writes **preserve each target's line endings** (a CRLF fork file stays CRLF).
@@ -63,8 +63,8 @@ then `--sync` distributes them plain → fork.
 | Category | Lead / source | Flow |
 |---|---|---|
 | `device_modules/`, math cores (`deer.py`, …) | **plain** | plain → fork (`--sync`) |
-| shared GUI/general (`widgets.py`, `csv_opener_saver.py`, `client.py`, …) | **plain** (after lifting the fork feature up) | fork → plain by hand, then plain → fork (`--sync`) |
-| `control_center/`, scripts, configs, `main_window.py`, `local_config.py` | **per fork** | not synced (EXPECTED) |
+| shared GUI/general (`main_window.py`, `widgets.py`, `csv_opener_saver.py`, `client.py`, …) | **plain** (after lifting the fork feature up) | fork → plain by hand, then plain → fork (`--sync`) |
+| `control_center/`, scripts, configs, `main.py`, `local_config.py` | **per fork** | not synced (EXPECTED) |
 | docs (`atomize/documentation/`) | **`atomize_docs` repo** | atomize_docs → all |
 
 `--sync` only ever pushes plain → fork. So if a fork is *ahead* of plain on a
@@ -80,8 +80,9 @@ Edit the constants at the top of `sync_check.py`:
   differ. Use `"ForkName:glob"` to scope an exemption to a single fork.
   Currently exempts: `control_center/*`, `script_examples/*`, `tests/*`,
   `config.ini`, device `config/*.ini`, `last_dir.py` (backend differs),
-  `local_config.py` (app_name isolation), `main_window.py`, `main/main.py`,
-  `__main__.py`, the fork-only `Keysight_2000_Xseries_2.py`, and Metrolab.
+  `local_config.py` (app_name isolation), `main/main.py` (fork-only
+  MainExtended), `__main__.py`, the fork-only `Keysight_2000_Xseries_2.py`, and
+  Metrolab. (`main_window.py` was promoted to plain-led — now `--sync`'d.)
 - **`PLAIN_LEAD`** — the broad shared-framework set `--sync` pushes plain →
   fork: `device_modules/`, `math_modules/`, `general_modules/`, `main/`,
   `__main__.py` (minus whatever EXPECTED skips).

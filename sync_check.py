@@ -53,7 +53,6 @@ EXPECTED = [
     # intentional framework divergences
     "atomize/general_modules/last_dir.py",   # libs/ vs user_config_dir backend
     "atomize/main/local_config.py",          # per-fork app_name isolation
-    "atomize/main/main_window.py",           # control-centre launch wiring
     "atomize/main/main.py",                  # fork-only MainExtended (EPR tab)
     "atomize/__main__.py",                   # imports the fork's extended main
     # fork-only / gitignored device drivers
@@ -67,8 +66,9 @@ EXPECTED = [
 # integration point: a feature developed fork-side is first lifted to plain by
 # hand (fork->plain), then `--sync` distributes it plain->fork to the others.
 # EXPECTED files are ALWAYS skipped, so the genuine per-fork divergences
-# (last_dir.py backend, main_window.py, local_config.py app_name, the fork-only
-# main.py / __main__.py, control_center, configs) are never clobbered.
+# (last_dir.py backend, local_config.py app_name, the fork-only main.py /
+# __main__.py, control_center, configs) are never clobbered. main_window.py is
+# now plain-led too (the per-fork wiring lives in main.py, not here).
 #
 # DRIVERS    — device drivers only; the narrow, always-safe plain->fork set
 #              used by `--apply-drivers`.
@@ -79,7 +79,7 @@ DRIVERS = [
 PLAIN_LEAD = DRIVERS + [
     "atomize/math_modules/*.py",
     "atomize/general_modules/*.py",   # last_dir.py is in EXPECTED -> skipped
-    "atomize/main/*.py",              # main_window/local_config/main are EXPECTED
+    "atomize/main/*.py",              # local_config/main are EXPECTED -> skipped
     "atomize/__main__.py",            # also EXPECTED -> skipped
 ]
 
@@ -210,8 +210,8 @@ WHAT --sync COPIES
   Shared, plain-led framework files that should be identical everywhere:
   device_modules/, math_modules/, general_modules/, main/, __main__.py.
   EXPECTED files are always skipped, so genuine per-fork divergences are safe:
-  last_dir.py (backend), main_window.py, local_config.py (app_name), the
-  fork-only main.py/__main__.py, control_center/, configs.
+  last_dir.py (backend), local_config.py (app_name), the fork-only
+  main.py/__main__.py, control_center/, configs.
 
 WORKFLOW
   plain is the integration point. Develop a GUI/feature in a fork, lift it to
