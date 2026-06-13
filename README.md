@@ -24,6 +24,12 @@ python3 sync_check.py --sync Atomize_NIOCH  #   ... to one fork
 python3 sync_check.py --sync -n             # dry-run: show what WOULD change
 python3 sync_check.py --apply-drivers Atomize_NIOCH   # device_modules only (narrow)
 
+# LIFT  (fork -> plain; port a fork-side feature UP into plain)
+python3 sync_check.py --lift Atomize_ITC                # preview what ITC is ahead on
+python3 sync_check.py --lift Atomize_ITC client.py      # lift one file (basename ok)
+python3 sync_check.py --lift Atomize_ITC --all          # lift everything ITC leads
+python3 sync_check.py --lift Atomize_ITC client.py -n   # dry-run
+
 python3 sync_check.py -h                     # help
 ```
 
@@ -42,6 +48,25 @@ Comparison is EOL-normalised (only real content differences are copied) and
 writes **preserve each target's line endings** (a CRLF fork file stays CRLF).
 Use `-n` for a dry-run first. `--apply-drivers` is the narrow variant that only
 touches `device_modules/*.py`.
+
+### `--lift` — port a fork feature up to plain (fork → plain)
+
+The inverse of `--sync`. When a shared GUI/general feature is developed in a
+fork, `--lift` copies the fork's version of the shared file(s) **up into plain**
+(the integration point), so `--sync` can then fan it out to the other forks.
+
+Because it writes to **plain — the source of truth for every fork** — it is
+deliberately conservative:
+
+- `--lift FORK` with no file names only **previews** what the fork is ahead on
+  and writes nothing.
+- name one or more files (full path, suffix, or bare basename) to lift exactly
+  those, or pass `--all` to lift every shared file the fork leads.
+- requires **one** fork (you can't lift "from all forks" — which version wins?).
+- skips every `EXPECTED`/per-fork file, EOL-normalises the comparison, and
+  preserves plain's line endings — same safety rules as `--sync`.
+
+Typical flow: `--lift FORK file.py` → review plain → `--sync` to distribute.
 
 ### What the report means
 
@@ -63,13 +88,13 @@ then `--sync` distributes them plain → fork.
 | Category | Lead / source | Flow |
 |---|---|---|
 | `device_modules/`, math cores (`deer.py`, …) | **plain** | plain → fork (`--sync`) |
-| shared GUI/general (`main_window.py`, `widgets.py`, `csv_opener_saver.py`, `client.py`, …) | **plain** (after lifting the fork feature up) | fork → plain by hand, then plain → fork (`--sync`) |
+| shared GUI/general (`main_window.py`, `widgets.py`, `csv_opener_saver.py`, `client.py`, …) | **plain** (after lifting the fork feature up) | fork → plain (`--lift`), then plain → fork (`--sync`) |
 | `control_center/`, scripts, configs, `main.py`, `local_config.py` | **per fork** | not synced (EXPECTED) |
 | docs (`atomize/documentation/`) | **`atomize_docs` repo** | atomize_docs → all |
 
 `--sync` only ever pushes plain → fork. So if a fork is *ahead* of plain on a
-shared file, lift it to plain first (the audit shows you the direction), then
-`--sync`.
+shared file, lift it to plain first with `--lift` (the audit shows you the
+direction), then `--sync`.
 
 ## Maintaining the manifest
 

@@ -20,8 +20,11 @@ Run:   python3 sync_check.py              # audit all forks, drift only
 Direction of truth (learned the hard way, see the project memory):
   * device_modules + math cores : plain is the LEAD  -> changes flow plain->fork
   * control_center / GUI / scripts: developed in the forks -> flow fork->plain
-So this tool only ever *auto-applies* the plain-lead category; everything else
-it reports for a human to resolve by hand.
+plain is the integration point. ``--sync`` fans the plain-lead set plain->fork;
+``--lift`` ports a fork-side feature the other way (fork->plain) so it can then
+be ``--sync``'d out. ``--lift`` writes to plain (the lead), so it acts only on
+the file(s) you name (or --all) and previews otherwise. control_center / configs
+(the EXPECTED set) are never auto-copied in either direction.
 """
 
 import os
@@ -87,6 +90,17 @@ PLAIN_LEAD = DRIVERS + [
 def matches(path, globs):
     # fnmatch '*' spans '/', so a single '*' after a dir matches the whole subtree.
     return any(fnmatch.fnmatch(path, g) for g in globs)
+
+
+def _path_selected(rel, paths):
+    """True if ``rel`` (repo-root-relative, e.g. atomize/general_modules/x.py) is
+    named by any user-given ``paths``. Accepts the full relative path, a trailing
+    suffix, or a bare basename so ``--lift FORK client.py`` just works."""
+    for p in paths:
+        p = p.replace(os.sep, "/")
+        if rel == p or rel.endswith("/" + p) or os.path.basename(rel) == p:
+            return True
+    return False
 
 
 def list_files(repo):
@@ -158,31 +172,54 @@ def _write_preserving_eol(src, dst):
     open(dst, "wb").write(data)
 
 
-def sync(fork, globs, label, dry_run=False):
-    """Copy plain->fork for every file matching ``globs`` that differs in content
-    or is missing, skipping anything in EXPECTED. Content comparison is
-    EOL-normalised, and writes preserve the target's line endings."""
-    lead = list_files(LEAD)
-    fk = list_files(fork)
+def _copy_set(src_repo, dst_repo, globs, label, dry_run=False, only=None):
+    """Copy src_repo->dst_repo for every file matching ``globs`` that differs in
+    content or is missing in the destination, skipping anything in EXPECTED.
+    Content comparison is EOL-normalised, and writes preserve the destination's
+    line endings.
+
+    ``only`` (optional) restricts the operation to that explicit set of relative
+    paths — used by ``--lift`` so a single fork-side feature can be ported to
+    plain without dragging along every other drifting file."""
+    src_files = list_files(src_repo)
+    dst_files = list_files(dst_repo)
     changed = []
-    for rel, src in sorted(lead.items()):
+    for rel, src in sorted(src_files.items()):
         if not matches(rel, globs) or matches(rel, EXPECTED):
             continue
-        if rel not in fk:
+        if only is not None and not _path_selected(rel, only):
+            continue
+        if rel not in dst_files:
             changed.append(("+", rel))
-        elif norm(src) != norm(fk[rel]):
+        elif norm(src) != norm(dst_files[rel]):
             changed.append(("~", rel))
         else:
             continue
         if not dry_run:
-            _write_preserving_eol(src, os.path.join(ROOT, fork, rel))
-    verb = "would sync" if dry_run else "synced"
-    print(f"\n=== {fork}: {label} ===")
+            _write_preserving_eol(src, os.path.join(ROOT, dst_repo, rel))
+    verb = "would copy" if dry_run else "copied"
+    print(f"\n=== {label} ===")
     if not changed:
         print("  already in sync — nothing to do")
     for sign, rel in changed:
         print(f"  {verb} {sign} {rel}")
-    return len(changed)
+    return [rel for _, rel in changed]
+
+
+def sync(fork, globs, label, dry_run=False):
+    """Distribute plain -> fork for the shared, plain-led file set."""
+    return len(_copy_set(LEAD, fork, globs, f"{fork}: {label}", dry_run=dry_run))
+
+
+def lift(fork, dry_run=False, only=None):
+    """Port a fork's version of a shared file UP to plain (fork -> plain).
+
+    This is the deliberate inverse of ``--sync``: a feature developed fork-side
+    is lifted into plain (the integration point) so ``--sync`` can then fan it
+    out to the other forks. It writes to PLAIN — the source of truth for every
+    fork — so callers gate the bulk form behind an explicit opt-in (see main)."""
+    return _copy_set(fork, LEAD, PLAIN_LEAD, f"lift {fork} -> plain",
+                     dry_run=dry_run, only=only)
 
 
 USAGE = """\
@@ -201,6 +238,15 @@ SYNC (plain -> fork; never touches EXPECTED/per-fork files)
   python3 sync_check.py --sync -n        dry-run: show what WOULD change
   python3 sync_check.py --apply-drivers <ForkName> device_modules only (narrow)
 
+LIFT (fork -> plain; port a fork-side feature UP into plain)
+  python3 sync_check.py --lift <ForkName>          preview what the fork is ahead on
+  python3 sync_check.py --lift <ForkName> <path>   lift just that file (basename ok)
+  python3 sync_check.py --lift <ForkName> --all    lift every shared file the fork leads
+  python3 sync_check.py --lift <ForkName> ... -n   dry-run
+  Writes to PLAIN (the lead). Preview-only unless you name path(s) or pass --all,
+  since plain is the source of truth for every fork. After lifting, run --sync to
+  fan the change out to the other forks. EXPECTED/per-fork files are never touched.
+
   python3 sync_check.py -h | --help      show this help
 
 KNOWN FORKS
@@ -215,8 +261,9 @@ WHAT --sync COPIES
 
 WORKFLOW
   plain is the integration point. Develop a GUI/feature in a fork, lift it to
-  plain by hand (fork -> plain), then run --sync to distribute it to the others.
-  Run an audit first to see direction; --sync only ever pushes plain -> fork.
+  plain with --lift (fork -> plain), then run --sync to distribute it to the
+  others. Run an audit first to see direction. --lift writes to the lead so it
+  only ever acts on the file(s) you name (or --all); --sync pushes plain->fork.
 
 NOTES
   * atomize/ package only; repo-root libs/, tests/, setup.py are fork-specific.
@@ -244,6 +291,32 @@ def main():
             sys.exit("usage: sync_check.py --apply-drivers <ForkName>")
         _check_fork(named[0])
         sync(named[0], DRIVERS, "device drivers", dry_run="-n" in args)
+        return
+
+    if "--lift" in args:
+        # fork -> plain: port a fork-side feature UP into plain. Writes to PLAIN
+        # (the lead / source of truth for every fork), so the bulk form is gated
+        # behind --all; otherwise we only PREVIEW unless explicit paths are named.
+        dry = "-n" in args
+        take_all = "--all" in args
+        named = [a for a in args if not a.startswith("-")]
+        if not named:
+            sys.exit("usage: sync_check.py --lift <ForkName> [path ...] [--all] [-n]")
+        fork, paths = named[0], named[1:]
+        _check_fork(fork)
+        if paths:
+            changed = lift(fork, dry_run=dry, only=paths)
+            if not changed:
+                print("  (no shared file matched those path(s) — typo, or already in sync)")
+        elif take_all:
+            changed = lift(fork, dry_run=dry)
+        else:
+            # safety: no paths and no --all -> show candidates, write nothing.
+            changed = lift(fork, dry_run=True)
+            if changed:
+                print("\n  ^ preview only. Lift specific files:")
+                print(f"      python3 sync_check.py --lift {fork} <path ...>")
+                print(f"    or all of them:  python3 sync_check.py --lift {fork} --all")
         return
 
     if "--sync" in args:
