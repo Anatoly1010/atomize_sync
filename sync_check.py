@@ -110,6 +110,18 @@ CONTROL_CENTER_SHARED = [
     "atomize/control_center/spin_dynamics_sim.py",
 ]
 
+# --- config files (EXPECTED; NEVER auto-synced; manual review/port only) ------
+# Device + main config hold PER-INSTALLATION hardware settings (GPIB addresses,
+# serial ports, IPs, calibration), so they are in EXPECTED and never carried by
+# --sync. But two cases legitimately need to move: a brand-new device's DEFAULT
+# config (plain->fork, the operator then edits it) and a shared new option/key.
+# `--check-config` un-hides config drift for review; `--port-config` is the
+# opt-in escape hatch to copy NAMED config file(s) by hand (either direction).
+CONFIG_FILES = [
+    "atomize/config.ini",
+    "atomize/device_modules/config/*.ini",
+]
+
 
 def matches(path, globs):
     # fnmatch '*' spans '/', so a single '*' after a dir matches the whole subtree.
@@ -284,6 +296,41 @@ def audit_cc():
     return any_drift
 
 
+def check_config(fork):
+    """Report config-file drift (fork vs plain). Config is EXPECTED-hidden in the
+    normal audit because it holds per-installation hardware settings, so this is
+    REVIEW-ONLY: eyeball each, then --port-config by hand the ones that should
+    actually move (a new device's default config, a shared new option)."""
+    lead = list_files(LEAD)
+    fk = list_files(fork)
+    cfg = sorted(r for r in (set(lead) | set(fk)) if matches(r, CONFIG_FILES))
+    differ = [r for r in cfg if r in lead and r in fk and norm(lead[r]) != norm(fk[r])]
+    missing = [r for r in cfg if r in lead and r not in fk]
+    extra = [r for r in cfg if r not in lead and r in fk]
+    print(f"\n===== {fork}: config vs plain ({len(cfg)} files) =====")
+    if not (differ or missing or extra):
+        print("  identical to plain")
+        return False
+    for r in differ:
+        print(f"  ~ {r}  (differs — usually per-installation hardware)")
+    for r in missing:
+        print(f"  - {r}  (in plain, MISSING in fork — new device default config?)")
+    for r in extra:
+        print(f"  + {r}  (fork-only)")
+    return True
+
+
+def port_config(fork, files, dry_run=False, to_plain=False):
+    """Manually copy NAMED config file(s) between plain and a fork. Config is in
+    EXPECTED (never auto-synced) because it's per-installation; this is the opt-in
+    escape hatch for the files that SHOULD move. Default plain->fork (seed a new
+    device's default config); ``to_plain`` reverses it (publish a fork-authored
+    config up). Requires explicit file names — NEVER bulk-copies hardware config."""
+    src, dst = (fork, LEAD) if to_plain else (LEAD, fork)
+    return _copy_set(src, dst, CONFIG_FILES, f"port config {src} -> {dst}",
+                     dry_run=dry_run, only=files, allow=CONFIG_FILES)
+
+
 USAGE = """\
 Atomize fork-sync auditor / distributor — compares each fork's atomize/ package
 against the upstream lead (plain Atomize), reports drift, and can push the
@@ -309,6 +356,18 @@ SYNC-CC (ITC -> endstation forks; the SHARED EPR control-centre tools only)
   sequence_calculator, spin_dynamics_sim) live only in the endstation forks, are
   developed in ITC, and are mirrored to the others. Every OTHER control_center file
   (fork-specific widgets, presets, wiring) is left untouched.
+
+CONFIG (per-installation, EXPECTED -> never auto-synced; review + manual port)
+  python3 sync_check.py --check-config             show config drift vs plain (all forks)
+  python3 sync_check.py --check-config <Fork>      ... one fork
+  python3 sync_check.py --port-config <Fork> <file.ini>   copy ONE config plain->fork
+  python3 sync_check.py --port-config <Fork> <file.ini> --to-plain   ... fork->plain
+  python3 sync_check.py --port-config <Fork> <file.ini> -n           dry-run
+  Config holds per-installation hardware settings, so it is EXPECTED to differ and
+  is never carried by --sync. --check-config un-hides the drift for review;
+  --port-config is the opt-in copy for the files that SHOULD move (a new device's
+  default config, a shared new option). It requires explicit file names (basename
+  ok) — it never bulk-copies hardware config.
 
 LIFT (fork -> plain; port a fork-side feature UP into plain)
   python3 sync_check.py --lift <ForkName>          preview what the fork is ahead on
@@ -402,6 +461,43 @@ def main():
                 print("\n  ^ preview only. Lift specific files:")
                 print(f"      python3 sync_check.py --lift {fork} <path ...>")
                 print(f"    or all of them:  python3 sync_check.py --lift {fork} --all")
+        return
+
+    if "--check-config" in args:
+        # review-only: un-hide the EXPECTED config files so drift can be judged.
+        named = [a for a in args if not a.startswith("-")]
+        targets = named or FORKS
+        for t in targets:
+            _check_fork(t)
+        any_drift = False
+        for f in targets:
+            any_drift |= check_config(f)
+        print()
+        print("Config drift above — per-installation settings are EXPECTED to differ.\n"
+              "Move only new device default configs / shared options, by hand:\n"
+              "    python3 sync_check.py --port-config <Fork> <file.ini>"
+              if any_drift else "All config files identical to plain.")
+        return
+
+    if "--port-config" in args:
+        # manual, explicit-file-only config copy (default plain->fork).
+        dry = "-n" in args
+        to_plain = "--to-plain" in args
+        named = [a for a in args if not a.startswith("-")]
+        if not named:
+            sys.exit("usage: sync_check.py --port-config <ForkName> <file ...> "
+                     "[--to-plain] [-n]")
+        fork, files = named[0], named[1:]
+        _check_fork(fork)
+        if not files:
+            # safety: name the exact file(s) — never bulk-copy hardware config.
+            print("  name the config file(s) to port (basename ok), e.g.:")
+            print(f"      python3 sync_check.py --port-config {fork} Lakeshore_335_config.ini")
+            print(f"  see what differs first:  python3 sync_check.py --check-config {fork}")
+            return
+        changed = port_config(fork, files, dry_run=dry, to_plain=to_plain)
+        if not changed:
+            print("  (no config file matched those name(s) — typo, or already in sync)")
         return
 
     if "--sync-cc" in args:

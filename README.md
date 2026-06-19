@@ -36,6 +36,13 @@ python3 sync_check.py --sync-cc Atomize_NIOCH            #   ... to one fork
 python3 sync_check.py --sync-cc Atomize_NIOCH deer_analysis.py   # one tool (basename ok)
 python3 sync_check.py --sync-cc -n                       # dry-run
 
+# CONFIG  (per-installation; EXPECTED -> never auto-synced; review + manual port)
+python3 sync_check.py --check-config                     # config drift vs plain (all forks)
+python3 sync_check.py --check-config Atomize_NIOCH       #   ... one fork
+python3 sync_check.py --port-config Atomize_NIOCH Rigol_mso8104_config.ini      # copy ONE config plain->fork
+python3 sync_check.py --port-config Atomize_ITC Foo_config.ini --to-plain       #   ... fork->plain
+python3 sync_check.py --port-config Atomize_NIOCH Rigol_mso8104_config.ini -n   # dry-run
+
 python3 sync_check.py -h                     # help
 ```
 
@@ -98,6 +105,25 @@ The default audit also prints an **"EPR control-centre"** section (ITC vs the
 endstation forks for these tools) whenever the run covers ITC and at least one
 of its EPR forks.
 
+### `--check-config` / `--port-config` — config files (manual only)
+
+Device + main config (`config.ini`, `device_modules/config/*.ini`) hold
+**per-installation hardware settings** (GPIB addresses, serial ports, IPs,
+calibration), so they are in `EXPECTED` and **never** carried by `--sync`. Two
+cases still legitimately move: a **new device's default config** added upstream
+(seed the fork, then the operator edits it), and a **shared new option/key**.
+
+- `--check-config [Fork]` is **review-only**: per fork vs plain it reports configs
+  that `~` differ (usually expected hardware settings), `-` are missing in the
+  fork (a new device default to seed), or `+` are fork-only.
+- `--port-config <Fork> <file.ini ...>` is the **opt-in manual copy**: it requires
+  explicit file name(s) (basename ok) — **never bulk-copies** hardware config —
+  defaults to plain → fork, takes `--to-plain` to publish a fork config up, and
+  honours `-n`. Same EOL rules as `--sync`.
+
+Typical flow: `--check-config FORK` → spot a `- missing` device config →
+`--port-config FORK That_config.ini`.
+
 ### What the report means
 
 ```
@@ -149,6 +175,9 @@ Edit the constants at the top of `sync_check.py`:
   `CONTROL_CENTER_SHARED` lists the shared tool paths (add a new shared tool
   here). These are copied even though they live under the EXPECTED
   `control_center/*`.
+- **`CONFIG_FILES`** — the config set `--check-config`/`--port-config` work on
+  (`config.ini`, `device_modules/config/*.ini`). Also in EXPECTED, so they're
+  never auto-synced; these two commands are the manual review/port escape hatch.
 
 ## Notes / gotchas
 
