@@ -20,11 +20,16 @@ Run:   python3 sync_check.py              # audit all forks, drift only
 Direction of truth (learned the hard way, see the project memory):
   * device_modules + math cores : plain is the LEAD  -> changes flow plain->fork
   * control_center / GUI / scripts: developed in the forks -> flow fork->plain
-plain is the integration point. ``--sync`` fans the plain-lead set plain->fork;
-``--lift`` ports a fork-side feature the other way (fork->plain) so it can then
-be ``--sync``'d out. ``--lift`` writes to plain (the lead), so it acts only on
-the file(s) you name (or --all) and previews otherwise. control_center / configs
-(the EXPECTED set) are never auto-copied in either direction.
+  * shared EPR control-centre tools (data_treatment, deer_analysis, ...): NOT in
+    plain; developed in ITC and mirrored to the other endstation forks -> ITC is
+    the lead, synced fork->fork with ``--sync-cc``.
+plain is the integration point for the shared framework. ``--sync`` fans the
+plain-lead set plain->fork; ``--lift`` ports a fork-side feature the other way
+(fork->plain) so it can then be ``--sync``'d out. ``--lift`` writes to plain (the
+lead), so it acts only on the file(s) you name (or --all) and previews otherwise.
+control_center (other than the shared tools above) / configs (the EXPECTED set)
+are never auto-copied. ``--sync-cc`` carries just the named shared CC tools
+ITC->endstation forks, exempting them from the control_center EXPECTED skip.
 """
 
 import os
@@ -84,6 +89,25 @@ PLAIN_LEAD = DRIVERS + [
     "atomize/general_modules/*.py",   # last_dir.py is in EXPECTED -> skipped
     "atomize/main/*.py",              # local_config/main are EXPECTED -> skipped
     "atomize/__main__.py",            # also EXPECTED -> skipped
+]
+
+# --- EPR control-center tools (fork -> fork, ITC-led) ------------------------
+# A handful of control-centre data-analysis tools are SHARED among the EPR
+# endstation forks but DO NOT exist in plain Atomize, so the plain-led machinery
+# above can't carry them. They are developed in ITC and mirrored to the other
+# endstation forks (NIOCH today, more later). control_center/* is in EXPECTED,
+# so `--sync-cc` exempts exactly the named files (via the `allow` arg) to copy
+# EPR_LEAD -> EPR_FORKS while still leaving every other control_center file
+# (fork-specific widgets, presets, wiring) untouched.
+EPR_LEAD = "Atomize_ITC"
+EPR_FORKS = ["Atomize_NIOCH"]        # endstation forks that receive ITC's tools; add future forks here
+CONTROL_CENTER_SHARED = [
+    "atomize/control_center/data_treatment.py",
+    "atomize/control_center/data_treatment_2d.py",
+    "atomize/control_center/deer_analysis.py",
+    "atomize/control_center/excitation_profile.py",
+    "atomize/control_center/sequence_calculator.py",
+    "atomize/control_center/spin_dynamics_sim.py",
 ]
 
 
@@ -172,7 +196,7 @@ def _write_preserving_eol(src, dst):
     open(dst, "wb").write(data)
 
 
-def _copy_set(src_repo, dst_repo, globs, label, dry_run=False, only=None):
+def _copy_set(src_repo, dst_repo, globs, label, dry_run=False, only=None, allow=()):
     """Copy src_repo->dst_repo for every file matching ``globs`` that differs in
     content or is missing in the destination, skipping anything in EXPECTED.
     Content comparison is EOL-normalised, and writes preserve the destination's
@@ -180,12 +204,16 @@ def _copy_set(src_repo, dst_repo, globs, label, dry_run=False, only=None):
 
     ``only`` (optional) restricts the operation to that explicit set of relative
     paths — used by ``--lift`` so a single fork-side feature can be ported to
-    plain without dragging along every other drifting file."""
+    plain without dragging along every other drifting file.
+
+    ``allow`` (optional) is a glob set that is EXEMPTED from the EXPECTED skip —
+    used by ``--sync-cc`` to copy the named shared control-centre tools even
+    though ``control_center/*`` is otherwise EXPECTED (never auto-synced)."""
     src_files = list_files(src_repo)
     dst_files = list_files(dst_repo)
     changed = []
     for rel, src in sorted(src_files.items()):
-        if not matches(rel, globs) or matches(rel, EXPECTED):
+        if not matches(rel, globs) or (matches(rel, EXPECTED) and not matches(rel, allow)):
             continue
         if only is not None and not _path_selected(rel, only):
             continue
@@ -222,6 +250,40 @@ def lift(fork, dry_run=False, only=None):
                      dry_run=dry_run, only=only)
 
 
+def sync_cc(fork, dry_run=False, only=None):
+    """Distribute the shared EPR control-centre tools EPR_LEAD -> fork.
+
+    Fork -> fork (ITC-led), independent of the plain-led sets: these tools don't
+    exist in plain. ``allow=CONTROL_CENTER_SHARED`` exempts exactly the named
+    files from the EXPECTED ``control_center/*`` skip; every other control-centre
+    file in the destination is left untouched."""
+    return _copy_set(EPR_LEAD, fork, CONTROL_CENTER_SHARED,
+                     f"{fork}: EPR control-centre tools", dry_run=dry_run,
+                     only=only, allow=CONTROL_CENTER_SHARED)
+
+
+def audit_cc():
+    """Report drift of the shared EPR control-centre tools across the endstation
+    forks against EPR_LEAD (ITC). Plain isn't involved — these are fork-led."""
+    lead = list_files(EPR_LEAD)
+    cc = sorted(r for r in lead if matches(r, CONTROL_CENTER_SHARED))
+    print(f"\n===== EPR control-centre  (lead: {EPR_LEAD}, {len(cc)} shared tools) =====")
+    any_drift = False
+    for fork in EPR_FORKS:
+        fk = list_files(fork)
+        differ = [r for r in cc if r in fk and norm(lead[r]) != norm(fk[r])]
+        missing = [r for r in cc if r not in fk]
+        if not (differ or missing):
+            print(f"  {fork}: in sync with {EPR_LEAD}")
+            continue
+        any_drift = True
+        for r in differ:
+            print(f"  {fork}: ~ {r}")
+        for r in missing:
+            print(f"  {fork}: - {r}  (missing in fork)")
+    return any_drift
+
+
 USAGE = """\
 Atomize fork-sync auditor / distributor — compares each fork's atomize/ package
 against the upstream lead (plain Atomize), reports drift, and can push the
@@ -238,6 +300,16 @@ SYNC (plain -> fork; never touches EXPECTED/per-fork files)
   python3 sync_check.py --sync -n        dry-run: show what WOULD change
   python3 sync_check.py --apply-drivers <ForkName> device_modules only (narrow)
 
+SYNC-CC (ITC -> endstation forks; the SHARED EPR control-centre tools only)
+  python3 sync_check.py --sync-cc        push ITC's shared CC tools to all EPR forks
+  python3 sync_check.py --sync-cc <Fork>           ... to one endstation fork
+  python3 sync_check.py --sync-cc <Fork> <path>    ... just that tool (basename ok)
+  python3 sync_check.py --sync-cc -n     dry-run: show what WOULD change
+  These tools (data_treatment, data_treatment_2d, deer_analysis, excitation_profile,
+  sequence_calculator, spin_dynamics_sim) live only in the endstation forks, are
+  developed in ITC, and are mirrored to the others. Every OTHER control_center file
+  (fork-specific widgets, presets, wiring) is left untouched.
+
 LIFT (fork -> plain; port a fork-side feature UP into plain)
   python3 sync_check.py --lift <ForkName>          preview what the fork is ahead on
   python3 sync_check.py --lift <ForkName> <path>   lift just that file (basename ok)
@@ -251,6 +323,9 @@ LIFT (fork -> plain; port a fork-side feature UP into plain)
 
 KNOWN FORKS
   {forks}
+
+EPR ENDSTATION FORKS (share ITC-led control-centre tools via --sync-cc)
+  {epr_forks}  (lead: {epr_lead})
 
 WHAT --sync COPIES
   Shared, plain-led framework files that should be identical everywhere:
@@ -271,6 +346,9 @@ NOTES
   * Audits .py and .ini only — NOT markdown docs (those mirror from atomize_docs).
   * New intentional divergence -> add a glob to EXPECTED ("ForkName:glob" for
     per-fork). New fork -> FORKS. Widen/narrow auto-sync via PLAIN_LEAD/DRIVERS.
+  * EPR control-centre tools are fork-led (ITC), NOT in plain: synced fork->fork
+    with --sync-cc. New shared tool -> CONTROL_CENTER_SHARED. New endstation fork
+    that should receive them -> EPR_FORKS.
 """
 
 
@@ -279,10 +357,17 @@ def _check_fork(name):
         sys.exit(f"unknown fork {name!r}; known: {', '.join(FORKS)}")
 
 
+def _check_epr_fork(name):
+    if name not in EPR_FORKS:
+        sys.exit(f"unknown EPR fork {name!r}; known: {', '.join(EPR_FORKS)} "
+                 f"(lead {EPR_LEAD} is the source, not a target)")
+
+
 def main():
     args = sys.argv[1:]
     if "-h" in args or "--help" in args:
-        print(USAGE.format(forks=", ".join(FORKS)))
+        print(USAGE.format(forks=", ".join(FORKS),
+                           epr_forks=", ".join(EPR_FORKS), epr_lead=EPR_LEAD))
         return
 
     if "--apply-drivers" in args:
@@ -319,6 +404,26 @@ def main():
                 print(f"    or all of them:  python3 sync_check.py --lift {fork} --all")
         return
 
+    if "--sync-cc" in args:
+        # ITC -> endstation forks: the shared EPR control-centre tools only.
+        # Named tokens split into target forks (in EPR_FORKS) and optional file
+        # filters (basename ok), like --lift. A token that looks like a fork
+        # name but isn't a known EPR fork is a typo -> clear error.
+        dry = "-n" in args
+        named = [a for a in args if not a.startswith("-")]
+        # A token is a file filter iff it looks like one (.py or contains '/');
+        # everything else is a fork name and must be a known EPR fork (a typo'd
+        # fork would otherwise be silently swallowed as a no-match filter).
+        paths = [a for a in named if a.endswith(".py") or "/" in a] or None
+        fork_tokens = [a for a in named if not (a.endswith(".py") or "/" in a)]
+        for a in fork_tokens:
+            _check_epr_fork(a)
+        forks = fork_tokens or EPR_FORKS
+        total = sum(len(sync_cc(f, dry_run=dry, only=paths)) for f in forks)
+        tip = "  (dry-run — re-run without -n to apply)" if dry else ""
+        print(f"\n{total} file(s) {'would change' if dry else 'synced'}.{tip}")
+        return
+
     if "--sync" in args:
         dry = "-n" in args
         named = [a for a in args if not a.startswith("-")]
@@ -338,6 +443,10 @@ def main():
     any_drift = False
     for fork in targets:
         any_drift |= audit(fork, verbose=verbose)
+    # Also report the fork-led EPR control-centre tools (ITC -> endstation forks)
+    # whenever the run covers the lead and at least one of its EPR targets.
+    if EPR_LEAD in targets and any(f in targets for f in EPR_FORKS):
+        any_drift |= audit_cc()
     print()
     print("Drift found — review above." if any_drift
           else "All forks in sync (only expected divergence).")

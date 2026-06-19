@@ -30,6 +30,12 @@ python3 sync_check.py --lift Atomize_ITC client.py      # lift one file (basenam
 python3 sync_check.py --lift Atomize_ITC --all          # lift everything ITC leads
 python3 sync_check.py --lift Atomize_ITC client.py -n   # dry-run
 
+# SYNC-CC  (ITC -> endstation forks; the shared EPR control-centre tools only)
+python3 sync_check.py --sync-cc                          # ITC -> all EPR forks
+python3 sync_check.py --sync-cc Atomize_NIOCH            #   ... to one fork
+python3 sync_check.py --sync-cc Atomize_NIOCH deer_analysis.py   # one tool (basename ok)
+python3 sync_check.py --sync-cc -n                       # dry-run
+
 python3 sync_check.py -h                     # help
 ```
 
@@ -68,6 +74,30 @@ deliberately conservative:
 
 Typical flow: `--lift FORK file.py` → review plain → `--sync` to distribute.
 
+### `--sync-cc` — share the EPR control-centre tools (ITC → endstation forks)
+
+A handful of control-centre data-analysis tools are **shared among the EPR
+endstation forks but do not exist in plain Atomize**, so the plain-led machinery
+above can't carry them. They are developed in **ITC** and mirrored to the other
+endstation forks. `--sync-cc` is the deliberate path for that — a **fork → fork,
+ITC-led** sync, independent of `--sync`/`--lift`.
+
+The shared tools (`CONTROL_CENTER_SHARED`):
+`data_treatment.py`, `data_treatment_2d.py`, `deer_analysis.py`,
+`excitation_profile.py`, `sequence_calculator.py`, `spin_dynamics_sim.py`.
+
+- `--sync-cc` copies ITC → **all** endstation forks (`EPR_FORKS`); name a fork to
+  target just one, and name `.py` file(s) after it to copy just those tools.
+- `control_center/*` stays in `EXPECTED`, so **every other control-centre file**
+  (fork-specific widgets, presets, launcher wiring) is left untouched — only the
+  named shared tools are exempted from the skip and copied.
+- EOL-normalised comparison, destination line endings preserved, `-n` dry-run —
+  same safety rules as `--sync`. A mistyped fork name is a hard error.
+
+The default audit also prints an **"EPR control-centre"** section (ITC vs the
+endstation forks for these tools) whenever the run covers ITC and at least one
+of its EPR forks.
+
 ### What the report means
 
 ```
@@ -89,7 +119,8 @@ then `--sync` distributes them plain → fork.
 |---|---|---|
 | `device_modules/`, math cores (`deer.py`, …) | **plain** | plain → fork (`--sync`) |
 | shared GUI/general (`main_window.py`, `widgets.py`, `csv_opener_saver.py`, `client.py`, …) | **plain** (after lifting the fork feature up) | fork → plain (`--lift`), then plain → fork (`--sync`) |
-| `control_center/`, scripts, configs, `main.py`, `local_config.py` | **per fork** | not synced (EXPECTED) |
+| shared EPR control-centre tools (`data_treatment*`, `deer_analysis.py`, `excitation_profile.py`, `sequence_calculator.py`, `spin_dynamics_sim.py`) — endstation forks only, not in plain | **ITC** | fork → fork (`--sync-cc`) |
+| other `control_center/`, scripts, configs, `main.py`, `local_config.py` | **per fork** | not synced (EXPECTED) |
 | docs (`atomize/documentation/`) | **`atomize_docs` repo** | atomize_docs → all |
 
 `--sync` only ever pushes plain → fork. So if a fork is *ahead* of plain on a
@@ -112,6 +143,12 @@ Edit the constants at the top of `sync_check.py`:
   fork: `device_modules/`, `math_modules/`, `general_modules/`, `main/`,
   `__main__.py` (minus whatever EXPECTED skips).
 - **`DRIVERS`** — the narrow set `--apply-drivers` uses: `device_modules/*.py`.
+- **`EPR_LEAD` / `EPR_FORKS` / `CONTROL_CENTER_SHARED`** — the `--sync-cc` set:
+  the lead is `Atomize_ITC`, the recipients are `EPR_FORKS` (add a future
+  endstation fork here so it starts receiving the tools), and
+  `CONTROL_CENTER_SHARED` lists the shared tool paths (add a new shared tool
+  here). These are copied even though they live under the EXPECTED
+  `control_center/*`.
 
 ## Notes / gotchas
 
