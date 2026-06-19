@@ -38,7 +38,7 @@ import fnmatch
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # /home/anatoly
 LEAD = "Atomize"
-FORKS = ["Atomize_ITC", "Atomize_NIOCH", "Atomize_Cryomech"]
+FORKS = ["Atomize_ITC", "Atomize_NIOCH", "Atomize_NIOCH_Q", "Atomize_Cryomech"]
 
 # Only these file types are compared (skip binaries, caches, presets).
 EXTS = (".py", ".ini")
@@ -100,7 +100,7 @@ PLAIN_LEAD = DRIVERS + [
 # EPR_LEAD -> EPR_FORKS while still leaving every other control_center file
 # (fork-specific widgets, presets, wiring) untouched.
 EPR_LEAD = "Atomize_ITC"
-EPR_FORKS = ["Atomize_NIOCH"]        # endstation forks that receive ITC's tools; add future forks here
+EPR_FORKS = ["Atomize_NIOCH", "Atomize_NIOCH_Q"]        # endstation forks that receive ITC's tools; add future forks here
 CONTROL_CENTER_SHARED = [
     "atomize/control_center/data_treatment.py",
     "atomize/control_center/data_treatment_2d.py",
