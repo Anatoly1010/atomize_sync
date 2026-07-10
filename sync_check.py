@@ -67,6 +67,10 @@ EXPECTED = [
     "atomize/device_modules/Keysight_2000_Xseries_2.py",
     "atomize/device_modules/Metrolab_PT2025.py",
     "atomize/device_modules/config/Metrolab_PT2025_config.ini",
+    "atomize/device_modules/Spectrum_M4I_4450_X8_invert.py",
+    "atomize/general_modules/csv_opener_saver_invert.py",
+    "atomize/general_modules/inversion_param.py",
+    "atomize/main/widgets_invert.py",
 ]
 
 # --- auto-sync sets (plain -> fork) -----------------------------------------
