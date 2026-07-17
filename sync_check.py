@@ -71,6 +71,7 @@ EXPECTED = [
     "atomize/general_modules/csv_opener_saver_invert.py",
     "atomize/general_modules/inversion_param.py",
     "atomize/main/widgets_invert.py",
+    "atomize/epr_auto/*",
 ]
 
 # --- auto-sync sets (plain -> fork) -----------------------------------------
