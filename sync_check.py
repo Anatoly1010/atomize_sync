@@ -111,6 +111,7 @@ CONTROL_CENTER_SHARED = [
     "atomize/control_center/data_treatment_2d.py",
     "atomize/control_center/deer_analysis.py",
     "atomize/control_center/excitation_profile.py",
+    "atomize/control_center/header_view.py",
     "atomize/control_center/sequence_calculator.py",
     "atomize/control_center/spin_dynamics_sim.py",
 ]
