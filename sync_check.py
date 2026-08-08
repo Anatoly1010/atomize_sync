@@ -116,6 +116,15 @@ CONTROL_CENTER_SHARED = [
     "atomize/control_center/spin_dynamics_sim.py",
 ]
 
+# Shared CC tools that are byte-identical ITC->forks EXCEPT for a single
+# per-fork line (e.g. a fork-specific default). Maps rel path -> the line-start
+# marker that identifies it. Such a line is IGNORED by the CC audit and KEPT on
+# --sync-cc (the fork's own value is preserved), so the tool still syncs fully
+# while the one intentional per-fork line survives.
+CC_PRESERVE = {
+    "atomize/control_center/sequence_calculator.py": "DEFAULT_GRID = ",
+}
+
 # --- config files (EXPECTED; NEVER auto-synced; manual review/port only) ------
 # Device + main config hold PER-INSTALLATION hardware settings (GPIB addresses,
 # serial ports, IPs, calibration), so they are in EXPECTED and never carried by
@@ -165,6 +174,25 @@ def norm(path):
         return fh.read().replace(b"\r\n", b"\n")
 
 
+def _neutralize(data, rel):
+    """Blank the per-fork preserved line (if any) so EOL-normalised content
+    compares equal across forks. ``data`` is already LF-normalised bytes."""
+    marker = CC_PRESERVE.get(rel)
+    if not marker:
+        return data
+    mb = marker.encode()
+    return b"\n".join(mb if ln.startswith(mb) else ln for ln in data.split(b"\n"))
+
+
+def _preserved_line(data, marker):
+    """Return the first line of LF-normalised ``data`` starting with ``marker``."""
+    mb = marker.encode()
+    for ln in data.split(b"\n"):
+        if ln.startswith(mb):
+            return ln
+    return None
+
+
 def audit(fork, verbose=False):
     lead = list_files(LEAD)
     fk = list_files(fork)
@@ -203,12 +231,21 @@ def audit(fork, verbose=False):
     return drift
 
 
-def _write_preserving_eol(src, dst):
+def _write_preserving_eol(src, dst, rel=None):
     """Write plain's content into dst, but keep dst's existing line endings so a
     CRLF fork file (e.g. NIOCH main/*) doesn't turn into a whole-file diff. New
-    files are written with plain's bytes verbatim (LF)."""
+    files are written with plain's bytes verbatim (LF). If ``rel`` names a
+    CC_PRESERVE file, the destination's own per-fork line is carried over so the
+    intentional per-fork value survives the copy."""
     data = open(src, "rb").read()
-    if os.path.exists(dst) and b"\r\n" in open(dst, "rb").read():
+    dst_bytes = open(dst, "rb").read() if os.path.exists(dst) else b""
+    marker = CC_PRESERVE.get(rel)
+    if marker and dst_bytes:
+        keep = _preserved_line(dst_bytes.replace(b"\r\n", b"\n"), marker)
+        src_line = _preserved_line(data.replace(b"\r\n", b"\n"), marker)
+        if keep is not None and src_line is not None:
+            data = data.replace(b"\r\n", b"\n").replace(src_line, keep)
+    if dst_bytes and b"\r\n" in dst_bytes:
         data = data.replace(b"\r\n", b"\n").replace(b"\n", b"\r\n")
     os.makedirs(os.path.dirname(dst), exist_ok=True)
     open(dst, "wb").write(data)
@@ -237,12 +274,12 @@ def _copy_set(src_repo, dst_repo, globs, label, dry_run=False, only=None, allow=
             continue
         if rel not in dst_files:
             changed.append(("+", rel))
-        elif norm(src) != norm(dst_files[rel]):
+        elif _neutralize(norm(src), rel) != _neutralize(norm(dst_files[rel]), rel):
             changed.append(("~", rel))
         else:
             continue
         if not dry_run:
-            _write_preserving_eol(src, os.path.join(ROOT, dst_repo, rel))
+            _write_preserving_eol(src, os.path.join(ROOT, dst_repo, rel), rel)
     verb = "would copy" if dry_run else "copied"
     print(f"\n=== {label} ===")
     if not changed:
@@ -289,7 +326,8 @@ def audit_cc():
     any_drift = False
     for fork in EPR_FORKS:
         fk = list_files(fork)
-        differ = [r for r in cc if r in fk and norm(lead[r]) != norm(fk[r])]
+        differ = [r for r in cc if r in fk
+                  and _neutralize(norm(lead[r]), r) != _neutralize(norm(fk[r]), r)]
         missing = [r for r in cc if r not in fk]
         if not (differ or missing):
             print(f"  {fork}: in sync with {EPR_LEAD}")
